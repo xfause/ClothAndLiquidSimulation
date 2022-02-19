@@ -1,52 +1,52 @@
-# 布料模拟
+# Cloth Simulation
 
 ## Summary
 
-传统的布料模拟使用的是基于力的做法，其基本步骤为：
-* 根据位置约束计算出质点受力
-* 根据受力计算出加速度
-* 利用加速度迭代速度
-* 利用速度迭代位置
+Traditional cloth simulation uses a force-based approach, the basic steps of which are:
+* Calculate the force of the particle according to the position constraint
+* Calculate the acceleration according to the force
+* Utilize acceleration to iterate speed
+* Iterate position using velocity
 
-但这种模拟方式需要较小的迭代步长，计算量较大，所以我使用了Position Base Dynamics算法，同时使用了unity的Job System进行并行计算，该算法的优点是可以使用较大的迭代步长，并且Job System配合Burst编译，性能非常可观。
+However, this simulation method requires a small iterative step size and requires a large amount of calculation, so I used the Position Base Dynamics algorithm, and at the same time used Unity's Job System for parallel computing. The advantage of this algorithm is that it can use a larger iteration step. Long, and the Job System is compiled with Burst, the performance is very impressive.
 
 ![](https://s2.loli.net/2022/01/12/LN5cxovImlHegJj.gif)
 
 ## PBD(Position Base Dynamics) Process
 
-PBD算法的流程如下
+The flow of the PBD algorithm is as follows
 
 ![](https://pic3.zhimg.com/80/v2-cfa71169bcab6c7cf3c6c7f8041e61ee_720w.jpg)
 
-图中x为当前质点位置,p为预测质点位置。可以看到:
+In the figure, x is the current particle position, and p is the predicted particle position. can be seen:
 
-* 算法在每一帧开始时，会根据外力和阻尼先于计算一个位置(p)
-* 根据当前位置(x)和预测位置(p)，去进行碰撞检测，如果发现有碰撞，就生成一个碰撞约束
-* 迭代求解所有约束，最终会得到新预测位置p
-* 利用p - x 来计算速度v，并将p赋值给x
-* 最后再计算一遍速度(处理碰撞反弹之类速度变换)
+* At the beginning of each frame, the algorithm calculates a position (p) before calculating the external force and damping
+* According to the current position (x) and the predicted position (p), perform collision detection. If a collision is found, a collision constraint is generated
+* Iteratively solve all constraints, and finally get a new predicted position p
+* Calculate velocity v using p - x and assign p to x
+* Finally calculate the speed again (processing speed transformation such as collision bounce)
 
-### 外部力和约束的定义
+### Definition of External Forces and Restraints
 
-像重力、风、可以视为外部力，但是像质点之间的相互作用我们通常视为内部约束，而非力。同样外部物体对质点的碰撞，也视为碰撞约束而不是外部力。
+Things like gravity and wind can be viewed as external forces, but interactions like particles are usually viewed as internal constraints rather than forces. Similarly, the collision of an external object against a particle is also regarded as a collision constraint rather than an external force.
 
-### 质点及布料模型
+### Particle and cloth models
 
-在物理上，我们通常可以将布料视作由一个个质点组成的结构。质点之间满足一定的约束条件，来模拟布料内部的作用力，如下图所示:
+Physically, we can usually think of cloth as a structure composed of individual particles. The particles satisfy certain constraints to simulate the force inside the cloth, as shown in the following figure:
 
 ![](https://pic2.zhimg.com/80/v2-fae7d8322e3906695060a236e7270395_720w.jpg)
 
-在传统的基于力的模拟中，质点之间的约束通常是用胡克定律以弹簧振子的形式去模拟。但是在基于位置的方案中，我们将会采用另外一种约束公式。
+In traditional force-based simulations, the constraints between particles are usually modeled in the form of spring oscillators using Hooke's law. But in the location-based scheme, we will use another constraint formulation.
 
-质点与布料模型顶点一一对应，然后让三角形的边作为顶点之间的约束。 好处是无需额外的骨骼绑定工作，我们可以针对满足一定的拓扑条件的任意Mesh进行布料模拟(1:一条边只被两个三角形共享 2:不封闭)，坏处是如果模型顶点较多，将比较耗费性能。
+The mass points correspond to the vertices of the cloth model one-to-one, and then let the edges of the triangles act as constraints between the vertices. The advantage is that there is no need for additional bone binding work, we can perform cloth simulation for any Mesh that meets certain topology conditions (1: one edge is only shared by two triangles 2: not closed), the disadvantage is that if the model has many vertices, it will be Relatively expensive.
 
-### 质量生成算法
+### Mass Generation Algorithm
 
-通常来说，我们可以给一块布指定其密度(kg/m^2)。 这样的话，我们就可以根据Mesh的面积来计算质量。具体来说就是:
+Generally speaking, we can assign a density (kg/m^2) to a piece of cloth. In this way, we can calculate the mass based on the area of the Mesh. Specifically:
 
-* 遍历Mesh的所有三角面
-* 计算每个三角面的面积，乘以密度得到质量
-* 将质量三等份，分别累加给每个顶点
+* Traverse all triangle faces of Mesh
+* Calculate the area of each triangular face, multiply by the density to get the mass
+* Divide the mass into three equal parts and add them to each vertex separately
 
 ```c#
 _masses = new NativeList<float>(this.vertexCount,Allocator.Persistent);
@@ -68,9 +68,9 @@ for(var i = 0; i < indices.Length / 3; i++){
 }
 ```
 
-### 预测位置计算
+### Predicted position calculation
 
-为了使用JobSystem进行并行计算，我们可以实现一个如下的结构:
+In order to use JobSystem for parallel computing, we can implement a structure as follows:
 ```c#
 struct PositionEstimateJob : IJobParallelFor
 {
@@ -98,37 +98,37 @@ struct PositionEstimateJob : IJobParallelFor
 }
 ```
 
-JobSystem将会在多线程上并发执行Execute函数，在这里将会针对每个质点执行一次Execute函数，index为当前执行的任务索引(也即质点索引)。由于在这一步每个质点只更新自己的预测位置，不存在Race Condition，因此可以进行无锁并发。
+JobSystem will execute the Execute function concurrently on multiple threads. Here, the Execute function will be executed once for each particle, and index is the index of the currently executing task (ie, the particle index). Since each particle only updates its own predicted position in this step, there is no Race Condition, so lock-free concurrency can be performed.
 
-在这里，我们输入的数据有:
-* positions - 位置
-* velocities - 速度
-* normals - 法线
-* masses - 质量
-* fieldForce - 外部场力,例如风力
-* damper - 阻尼系数
-*dt - 迭代时间
+Here, our input data are:
+* positions - positions
+* velocities - speed
+* normals - normals
+* masses - mass
+* fieldForce - external field force, such as wind
+* damper - damping coefficient
+*dt - iteration time
 
-输出为:
+The output is:
 * predictPositions
 
-位置预测公式如下:
+The location prediction formula is as follows:
 
 ![](https://www.zhihu.com/equation?tex=%5Cbegin%7Baligned%7D+%5Cvec%7Bv_1%7D+%3D+%5Cvec%7Bv_0%7D+%2B+%28%5Cvec%7Bg%7D++%2B+%5Cfrac%7B%5Cvec%7BF_%7Be%7D%7D%7D%7Bm%7D%29+%5CDelta+t+%5Cnewline+v_1+%3D+v_1+%2A+%5Cmax%281+-+%5Cfrac%7Bk_d%7D%7Bm%7D+%5CDelta+t%2C0%29+%5Cnewline+p_1+%3D+p_0+%2B+v_1+%2A+%5CDelta+t+%5Cend%7Baligned%7D+)
 
-这三条公式，第一步为预测速度，第二步对速度施加阻尼，其中kd为阻尼系数，第三步利用速度预测位置。
+In these three formulas, the first step is to predict the speed, the second step is to apply damping to the speed, where kd is the damping coefficient, and the third step uses the speed to predict the position.
 
-g为重力加速度， Fe为作用于质点的外力，在本例里我们只用到了风力。 风对质点的作用力，需要投影到质点的法线方向，这也是为什么这个Job的输入需要有法线信息。
+g is the acceleration of gravity, Fe is the external force acting on the particle, in this example we only use the wind force. The force of the wind on the particle needs to be projected to the normal direction of the particle, which is why the input of this Job needs to have normal information.
 
-随风舞动的效果：
+The effect of dancing with the wind:
 
 ![HbdOat.gif](https://s4.ax1x.com/2022/02/19/HbdOat.gif)
 
 ## Collisions
 
-针对球体(Sphere)、方体(Box)、胶囊(Capsule)三种基础类型的碰撞检测。为简单起见，目前采用离散的检测方式，即判断质点是否在相关碰撞体内部。
+Collision detection for three basic types of Sphere, Box, and Capsule. For the sake of simplicity, a discrete detection method is currently used, that is, it is judged whether the particle is inside the relevant collision body.
 
-算法流程为:
+The algorithm flow is:
 
 ```
 for position, predictPosition,index in vertices:
@@ -137,23 +137,22 @@ for position, predictPosition,index in vertices:
     if concat:
       AddCollisionConstraint(index,concat.position,concat.normal)
 ```
-* 遍历所有质点，取其位置和预测位置，与所有的碰撞体做检测
-* 如果发现进入碰撞体内部，则计算出碰撞体表面距离当前质点最近的一个点
-* 对当前质点施加一个碰撞约束，让其在后面的约束迭代中强行离开碰撞体，回到表面去。
+* Traverse all the particles, take their positions and predicted positions, and check with all the colliders
+* If it is found to be inside the collider, calculate the closest point on the surface of the collider to the current particle
+* Apply a collision constraint to the current particle, forcing it to leave the collider and return to the surface in subsequent iterations of the constraint.
 
-
-在IntersectUtil这个类里。我们实现了判定一个点是否在碰撞体内部
+In the IntersectUtil class. We implemented to determine whether a point is inside the collider
 ```c#
 public static bool GetClosestSurfacePoint(float3 p, SphereDesc sphere, out ConcatInfo concatInfo)
 ```
 
-GetClosestSurfacePoint它接收一个点p坐标，和一个碰撞体描述(SphereDesc)，如果发现点在碰撞体内部，就返回true,并且输出一个ConcatInfo结构。
+GetClosestSurfacePoint It receives a point p coordinate, and a collision body description (SphereDesc), if the point is found inside the collision body, it returns true, and outputs a ConcatInfo structure.
 
-ConcatInfo里保存了碰撞体表面距离p最近一个点的position和normal信息。
+ConcatInfo stores the position and normal information of the point closest to p on the surface of the collider.
 
-我们的目的是让这些碰撞体来约束布料的同时，布料也要反作用于这些碰撞体(假如是RigidBody的话)。
+Our goal is for these colliders to constrain the cloth, and at the same time the cloth also reacts to these colliders (if it is a RigidBody).
 
-因此我们还需要额外定义一个刚体描述结构:
+Therefore, we also need to define an additional rigid body description structure:
 ```c#
 public struct RigidbodyDesc{
     public float mass;
@@ -161,7 +160,7 @@ public struct RigidbodyDesc{
     public float3 velocity;
 }
 ```
-然后将RigidBody和Collider组合在一起:
+Then combine RigidBody and Collider together:
 ```c#
 public struct RigidbodyColliderDesc<T> where T:IColliderDesc{
     public int entityId;
@@ -169,9 +168,9 @@ public struct RigidbodyColliderDesc<T> where T:IColliderDesc{
     public RigidbodyDesc rigidbody;
 }
 ```
-其中entityId后面会用来查找Unity对象。
+The entityId will be used later to find the Unity object.
 
-然后定义个结构把所有需要与布料进行碰撞检测的数据整合在一起:
+Then define a structure to integrate all the data needed for collision detection with the cloth:
 ```c#
 public struct CollidersGroup{
     private NativeList<RigidbodyColliderDesc<SphereDesc>> _spheres;
@@ -180,7 +179,7 @@ public struct CollidersGroup{
 }
 ```
 
-### 球体碰撞
+### Sphere collision
 
 ```c#
 public struct SphereDesc{
@@ -190,7 +189,7 @@ public struct SphereDesc{
 ```
 ![](https://s4.ax1x.com/2022/02/19/Hbd7KH.png)
 
-### 胶囊碰撞
+### Capsule collision
 
 ```c#
 public struct CapsuleDesc{
@@ -200,7 +199,7 @@ public struct CapsuleDesc{
 }
 ```
 
-### 平行六面体
+### Parallelepiped
 
 ```c#
 public struct BoxDesc{
@@ -212,15 +211,15 @@ public struct BoxDesc{
 }
 ```
 
-使用了xyz-min的角、和3个边向量来定义这个Box，严格来说，它能描述三维空间中的任意平行六面体。其中三个边向量，我们用float4保存，并且做了一些预计算。其xyz分量为单位向量，w分量向量长度。相关的预计算可以加速后面的碰撞检测。
+The xyz-min angle and 3 edge vectors are used to define this Box. Strictly speaking, it can describe any parallelepiped in three-dimensional space. Three of the edge vectors, we save with float4, and do some precomputing. Its xyz components are unit vectors, and the w component vector length. The associated pre-computation can speed up later collision detection.
 
 ![](https://s4.ax1x.com/2022/02/19/HbdbqA.png)
 
 ### Collision Job
 
-我们需要用多线程任务并行执行碰撞检测和反作用力计算。
+We need to perform collision detection and reaction force calculations in parallel with multithreaded tasks.
 
-这个Job的输入输出数据结构
+The input and output data structure of this Job
 ```c#
 public struct CollisionJob : IJobParallelFor
 {
@@ -241,39 +240,39 @@ public struct CollisionJob : IJobParallelFor
 }
 ```
 
-它会根据当前质点的predictPosition和position信息，与CollidersGroup中的所有碰撞体进行碰撞检测，如果检测到有碰撞发生，则会做如下事情:
+It will perform collision detection with all colliders in the CollidersGroup based on the predictPosition and position information of the current particle. If a collision is detected, it will do the following:
 
-* 修正predictPosition，避免碰撞发生
-* 将双方速度投影到接触点法线方向，利用动量守恒、动能公式重新计算双方在法线方向的速度
-* 将对Collider的速度修正贡献写入到rigidBodyForceApplies中，供后续实际作用到unity rigidboy对象。
-* 将对质点的约束信息写入到collisionConstraints中，供后续约束迭代阶段使用.
+* Fix predictPosition to avoid collision
+* Project the speed of both parties to the normal direction of the contact point, and use the momentum conservation and kinetic energy formula to recalculate the speed of both parties in the normal direction
+* Write the speed correction contribution to Collider into rigidBodyForceApplies for subsequent actual effects on the unity rigidboy object.
+* Write the constraint information on the particle into collisionConstraints for use in subsequent constraint iteration stages.
 
-在法线方向上，碰撞引起的速度改变符合动量守恒定律
+In the normal direction, the velocity change caused by the collision follows the law of conservation of momentum
 
-实际上，如果两个物体表面存在摩擦力，那么在垂直于法线的另一个方向上也会产生力的相互作用。但是在当前的这个版本里，我们暂且忽略了。
+In fact, if there is friction between the surfaces of two objects, there will also be a force interaction in the other direction perpendicular to the normal. But in the current version, we ignore it for now.
 
 ## Constraints
 
-在布料模拟中，存在如下几种约束:
+In cloth simulation, the following constraints exist:
 
-* 距离约束
-* 弯曲约束
-* 固定约束
-* 碰撞约束
+* Distance constraints
+* Bending constraints
+* Fixed constraints
+* Collision constraints
 
-### 距离约束
+### Distance constraints
 
-距离约束就是两个质点之间的距离，必须保持被约束在一定范围之内。
+A distance constraint is the distance between two particles, which must remain constrained within a certain range.
 
-通常在布料初始化的时候，会记录下存在距离约束关系的质点之间的距离，称为RestLength。 在后续模拟中，当两个质点间距离小于RestLength时，我们就要将其推开，反之则要将他们拉拢。也即他们之间存在一根无形的弹簧。
+Usually when the cloth is initialized, the distance between the particles with the distance constraint relationship is recorded, which is called RestLength. In subsequent simulations, when the distance between the two particles is less than RestLength, we will push them apart, otherwise we will pull them together. That is, there is an invisible spring between them.
 
-两个质点之间的距离约束，要符合下述的迭代公式呢。为p1和p2分别计算出它们的修正量delta_p1和delta_p2。
+The distance constraint between two mass points must conform to the following iterative formula. Calculate their corrections delta_p1 and delta_p2 for p1 and p2, respectively.
 
 ![](https://www.zhihu.com/equation?tex=+%5Cbegin%7Baligned%7D+%5CDelta+%5Cvec%7Bp_1%7D+%3D+-+%5Cfrac%7Bm_2%7D%7Bm_1+%2B+m_2%7D%28%7Cp_1+-+p_2%7C+-+d%29+%5Cfrac%7Bp_1+-+p_2%7D%7B%7Cp_1-p_2%7C%7D+%5Cnewline+%5CDelta+%5Cvec%7Bp_2%7D+%3D+%5Cfrac%7Bm_1%7D%7Bm_1+%2B+m_2%7D%28%7Cp_1+-+p_2%7C+-+d%29+%5Cfrac%7Bp_1+-+p_2%7D%7B%7Cp_1-p_2%7C%7D+%5Cnewline+%5Cend%7Baligned%7D+)
 
-原论文[Matthias Müller, Position Based Dynamics, 2006](https://matthias-research.github.io/pages/publications/posBasedDyn.pdf) 中给出了更一般的约束关系的公式推导，有兴趣可以看看，主要是用了牛顿-拉夫逊迭代法。
+The original paper [Matthias Müller, Position Based Dynamics, 2006](https://matthias-research.github.io/pages/publications/posBasedDyn.pdf) gives a more general formula derivation of the constraint relationship, if you are interested, you can read it See, mainly using the Newton-Raphson iteration method.
 
-在本例中，我们根据三角面信息，为所有存在边连接的点建立距离约束。即:
+In this example, we establish distance constraints for all points connected by edges based on the triangular face information. which is:
 
 ```c#
 private void BuildDistConstraints(){
@@ -283,7 +282,7 @@ private void BuildDistConstraints(){
     }
 }
 ```
-距离约束结构定义:
+Definition of distance constraint structure:
 ```c#
 public struct DistanceConstraintInfo{
     public float restLength;
@@ -292,23 +291,23 @@ public struct DistanceConstraintInfo{
 }
 ```
 
-### 弯曲约束
+### Bending Constraints
 
-弯曲约束可以用来控制相邻两个面片的对折程度，这符合现实中布料的特性。 例如当我们将一块布料对折放置在平面上，其对折处会有一段弧形隆起。这就是布料内部结构存在的抵抗弯曲的力。 下图展示了一个弯曲约束的效果:
+Bend constraints can be used to control the degree of folding between two adjacent patches, which is in line with the characteristics of real cloth. For example, when we fold a piece of fabric on a flat surface, there will be an arc-shaped bulge at the fold. This is the resistance to bending that exists in the inner structure of the cloth. The following image shows the effect of a bend constraint:
 
 ![](https://s4.ax1x.com/2022/02/19/HbdHrd.png)
 
-在布料建模中，弯曲约束可以由如下一幅图定义，来自上一节的论文:
+In cloth modeling, bending constraints can be defined by the following diagram, from the paper in the previous section:
 
 ![](https://pic4.zhimg.com/80/v2-bebc6ae2f998865b492d4dfe28be829f_720w.jpg)
 
-两个相邻的三角面，共4个顶点，组成一个约束公式。
+Two adjacent triangular faces, with a total of 4 vertices, form a constraint formula.
 
-两个三角面的法线点乘，给出了三角面的夹角信息，在后续的模拟迭代中，我们只要约束这个夹角就行了。论文中同样给出了完整的计算公式推导过程:
+The dot product of the normals of the two triangular faces gives the angle information of the triangular faces. In subsequent simulation iterations, we only need to constrain this angle. The paper also gives the complete calculation formula derivation process:
 
 ![](https://pic4.zhimg.com/80/v2-4479de9660ff420484ef391799a4577f_720w.jpg)
 
-弯曲约束的结构定义:
+Structural Definition of Bending Constraints:
 
 ```c#
 public struct BendConstraintInfo{
@@ -320,15 +319,15 @@ public struct BendConstraintInfo{
 }
 ```
 
-### 固定约束
+### Fixed constraints
 
-这种约束是将某个质点固定在某个坐标上，令其无法移动。 所以这个约束的实现很简单，我们只要让这个质点位置不变，速度为0即可。
+This constraint is to fix a particle at a certain coordinate so that it cannot move. So the implementation of this constraint is very simple, we only need to keep the position of the particle unchanged and the velocity to be 0.
 
-### 碰撞约束
+### Collision constraints
 
-我们之前提到了碰撞运算，但是在碰撞计算阶段并不会去直接修改质点的位置，而是生成一个碰撞约束，交由后续约束迭代阶段进行质点位置计算。
+We mentioned the collision operation before, but in the collision calculation stage, the position of the particle is not directly modified, but a collision constraint is generated, and the particle position is calculated in the subsequent constraint iteration stage.
 
-目前碰撞约束的结构很简单:
+The structure of the current collision constraint is simple:
 
 ```c#
 public struct CollisionConstraintInfo{
@@ -338,17 +337,17 @@ public struct CollisionConstraintInfo{
 }
 ```
 
-在约束迭代阶段，质点会将自己的位置尽量往concatPosition去靠近。碰撞约束作为最高级约束，在其生效时，其他的约束不起作用。 velocity保存了碰撞计算得到的质点速度。
+In the constraint iteration phase, the particle will try to move as close to the concatPosition as possible. Collision constraints are the top-level constraints, and when they are in effect, other constraints have no effect. velocity holds the particle velocity calculated from the collision.
 
 ## Iterations
 
-### 约束迭代
+### Constrained iteration
 
-考虑到Unity JobSystem的特性，目前实现的约束迭代流程如下:
+Considering the characteristics of Unity JobSystem, the currently implemented constraint iteration process is as follows:
 
-* Distance Constraint Job - 独立线程计算，把结果写入positionCorrect数组
-* Bend Constraint Job - 独立线程计算，依赖第一步完成，同样把结果累加到positionCorrect数组
-* Final Constraint Job - 多线程并发计算，会处理固定约束、碰撞约束，并且合并1,2两步生成的positionCorrect.
+* Distance Constraint Job - independent thread calculation, write the result to the positionCorrect array
+* Bend Constraint Job - independent thread calculation, relying on the first step to complete, also accumulate the results to the positionCorrect array
+* Final Constraint Job - Multi-threaded concurrent calculation, it will process fixed constraints, collision constraints, and merge the positionCorrect generated by 1 and 2 steps.
 
 ```c#
 private JobHandle StartConstraintsSolveJob(JobHandle depend){
@@ -363,17 +362,17 @@ private JobHandle StartConstraintsSolveJob(JobHandle depend){
 }
 ```
 
-### 更新质点位置和速度
+### Update particle position and velocity
 
-在完成约束迭代计算之后，我们得到了一份最终版本的predictPositions。
+After iterative computation of constraints, we get a final version of predictPositions.
 
-然后利用以下公式完成速度和位置的更新:
+The velocity and position updates are then accomplished using the following formulas:
 ```
 velocity = (predictPosition - position)/dt
 position = predictPosition
 ```
 
-如果质点在之前的碰撞计算中得到了新的速度，那么这里采用碰撞计算的速度作为最新速度
+If the particle has a new velocity in the previous collision calculation, then the collision calculation velocity is used as the latest velocity here
 
 ```c#
 public void Execute(int index)
@@ -386,13 +385,13 @@ public void Execute(int index)
    positions[index] = predictPositions[index];
 }
 ```
-这里同样是一个多线程并发计算的Job。
+Here is also a multi-threaded concurrent computing Job.
 
-### 布料对外部物体施加力
+### Cloth exerts force on external objects
 
-在先前的CollisionJob阶段，我们已经完成了碰撞反馈计算，并把对场景Rigidbody的作用速度写入到了```NativeList<RigidBodyForceApply>```数组中。
+In the previous CollisionJob stage, we have completed the collision feedback calculation and written the action speed to the scene Rigidbody into the ```NativeList<RigidBodyForceApply>``` array.
 
-那么接下来，我们只要取得这个数组，查找到对应的Rigidbody，对其使用AddForce()即可:
+Next, we just need to get this array, find the corresponding Rigidbody, and use AddForce() on it:
 ```c#
 private void ApplyPhysicalSimulationToRigidbodies(){
    for(var i = 0; i < _rigidBodyForceApplys.Length; i ++){
@@ -401,31 +400,31 @@ private void ApplyPhysicalSimulationToRigidbodies(){
    }
 }
 ```
-以下是布料下落推动一个球体向前滚动的效果:
+Here's the effect of falling cloth pushing a sphere forward:
 
 ![](https://s4.ax1x.com/2022/02/19/HbdLVI.gif)
 
 ## Todo
 
-### 连续碰撞检测
+### Continuous collision detection
 
-在离散碰撞检测下，我们只要检测质点是否位于碰撞体内部即可，但离散检测在速度较快、或者卡顿导致两帧之间物体位移较大的情况下会发生穿透现象。
+Under discrete collision detection, we only need to detect whether the particle is located inside the collision body, but the discrete detection will penetrate when the speed is fast, or when the object is stuttered and the displacement between the two frames is large.
 
-连续性碰撞检测的出现就是为了修正这个问题。例如对于质点，我们可以将其前后两帧的位置连成一根线，然后判断这根线是否与碰撞体相交。很明显连续性碰撞检测需要的计算量是远大于离散性检测的，手写所有Collider的连续碰撞检测工作量较大，所以并未实现。
+Continuity collision detection came into existence to correct this problem. For example, for a mass point, we can connect the positions of the two frames before and after it into a line, and then determine whether this line intersects the collider. Obviously, the amount of computation required for continuous collision detection is much larger than discrete detection. The continuous collision detection of all Colliders by handwriting has a large workload, so it has not been implemented.
 
-### 布料破坏
+### Cloth destruction
 
-布料破坏的原理是比较简单的。即当两个质点之间的距离超出一定阈值，那么视为被撕裂，我们就移除这两个质点之间的距离约束。
+The principle of cloth destruction is relatively simple. That is, when the distance between the two particles exceeds a certain threshold, it is considered to be torn, and we remove the distance constraint between the two particles.
 
-但问题在于，我们需要动态去调整Mesh的拓扑结构。当布料被撕裂时，我们需要:
+But the problem is that we need to dynamically adjust the topology of the Mesh. When the fabric is torn, we need to:
 
-* 在Mesh撕裂位置新增顶点
-* 调整附近三角面的顶点索引，插入新增的顶点，以起到让两个三角面分离的效果
-* 更新布料的距离约束、弯曲约束关系
+* Added vertices at the Mesh tearing position
+* Adjust the vertex index of the nearby triangular face, insert the new vertex, to have the effect of separating the two triangular faces
+* Update the distance constraints and bending constraints of the cloth
 
-以上需要我们在一开始的时候建立好布料的拓扑关系，以快速的根据顶点查询边、三角面等信息。 另一方面，如果存在动态增删布料顶点和相关约束关系的话，对数据结构的设计也是一种考验。
+The above requires us to establish the topological relationship of the cloth at the beginning, so as to quickly query the information such as edges and triangles according to the vertices. On the other hand, if there are dynamic addition and deletion of cloth vertices and related constraints, the design of the data structure is also a test.
 
-### 自相交
+### Self-intersection
 
 # Liquid
 
